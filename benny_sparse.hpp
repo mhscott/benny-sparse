@@ -340,6 +340,43 @@ return 0;
 
   return 0;
  } 
+
+ /// @brief Solve Ux=b where U is upper triangular
+ /// @param x On input, x contains b
+ /// @return 
+ int benny_usolve(double *x) const
+ {
+  if (!is_csc() || x == 0) return -1;
+
+  int *Up = this->p;
+  int *Ui = this->i;
+  double *Ux = this->x;
+  for (int j = 0; j < n; j++) {
+    x[j] /= Ux[Up[j+1]-1];
+    for (int p = Up[j]; p < Up[j+1]-1; p++) x[Ui[p]] -= Ux[p]*x[j];
+  }
+
+  return 0;
+ }
+
+ /// @brief Solve U'x=b where L is uppser triangular
+ /// @param x On input, x contains b
+ /// @return 
+ int benny_utsolve(double *x) const
+ {
+  if (!is_csc() || x == 0) return -1;
+
+  int *Up = this->p;
+  int *Ui = this->i;
+  double *Ux = this->x;
+  for (int j = 0; j < n; j++) {
+    for (int p = Up[j]; p < Up[j+1]-1; p++) x[j] -= Ux[p]*x[Ui[p]];
+    x[j] /= Ux[Up[j+1]-1];
+  }
+
+  return 0;
+ } 
+
 };
 
 #endif
