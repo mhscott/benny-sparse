@@ -351,7 +351,7 @@ return 0;
   int *Up = this->p;
   int *Ui = this->i;
   double *Ux = this->x;
-  for (int j = 0; j < n; j++) {
+  for (int j = n-1; j >= 0; j--) {
     x[j] /= Ux[Up[j+1]-1];
     for (int p = Up[j]; p < Up[j+1]-1; p++) x[Ui[p]] -= Ux[p]*x[j];
   }
