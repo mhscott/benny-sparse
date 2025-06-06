@@ -377,6 +377,94 @@ return 0;
   return 0;
  } 
 
+private:
+ int benny_flip(int i) {return -i-2;}
+ int benny_unflip(int i) {return (i < 0) ? benny_flip(i) : i;}
+ bool benny_marked(int *w, int j) {return w[j] < 0;}
+ void benny_mark(int *w, int j) {w[j] = benny_flip(w[j]);}
+
+ /// @brief C++ implementation of cs_reach function on page 33
+ /// @param G 
+ /// @param B 
+ /// @param k 
+ /// @param xi 
+ /// @param pinv 
+ /// @return 
+ int benny_reach(benny_sparse *G, const benny_sparse *B, int k, int *xi, const int *pinv)
+ {
+   if (!G->is_csc() || !B->is_csc() || xi == 0) return -1;
+
+   int n = G->n; int *Bp = B->p; int *Bi = B->i; int *Gp = G->p;
+   int top = G->n;
+   for (int p = Bp[k]; p < Bp[k+1]; p++)
+     if (!benny_marked(Gp,Bi[p])) top = benny_dfs(Bi[p],G,top,xi,xi+n,pinv);
+   for (int p = top; p < n; p++) benny_mark(Gp, xi[p]);
+
+   return top;
+ }
+
+ /// @brief C++ implementation of cs_dfs function on page 33
+ /// @param j 
+ /// @param G 
+ /// @param top 
+ /// @param xi 
+ /// @param pstack 
+ /// @param pinv 
+ /// @return 
+ int benny_dfs(int j, benny_sparse *G, int top, int *xi, int *pstack, const int *pinv)
+ {
+   if (!G->is_csc() || xi == 0 || pstack == 0) return -1;
+
+   int *Gp = G->p; int *Gi = G->i;
+   int head = 0;
+   xi[0] = j;
+   while (head >= 0) {
+    j = xi[head];
+    int jnew = (pinv != 0) ? pinv[j] : j;
+    if (!benny_marked(Gp,j)) {
+      benny_mark(Gp,j);
+      pstack[head] = (jnew < 0) ? 0 : benny_unflip(Gp[jnew]);
+    } 
+    bool done = true;
+    int p2 = (jnew < 0) ? 0 : benny_unflip(Gp[jnew+1]);
+    for (int p = pstack[head]; p < p2; p++) {
+      int i = Gi[p];
+      if (benny_marked(Gp,i)) continue;
+      pstack[head] = p;
+      xi[++head] = i;
+      done = false;
+      break;
+    }
+    if (done) {
+      head--;
+      xi[--top] = j;
+    }
+   }
+
+   return top;
+ }
+
+ int benny_spsolve(benny_sparse *G, const benny_sparse *B, int k, int *xi, double *x, const int *pinv, bool lo = true)
+ {
+   if (!G->is_csc() || !B->is_csc() || xi == 0 || x == 0) return -1;
+
+   int *Gp = G->p; int *Gi = G->i; double *Gx = G->x; int n = G->n;
+   int *Bp = B->p; int *Bi = B->i; double *Bx = B->x; 
+   int top = benny_reach(G, B, k, xi, pinv);
+   for (int p = top; p < n; p++) x[xi[p]] = 0;
+   for (int p = Bp[k]; p < Bp[k+1]; p++) x[Bi[p]] = Bx[p];
+   for (int px = top; px < n; px++) {
+    int j = xi[px];
+    int J = (pinv != 0) ? pinv[j] : j;
+    if (J < 0) continue;
+    x[j] /= Gx[lo ? Gp[J] : Gp[J+1]-1];
+    int p = lo ? Gp[J]+1 : Gp[J];
+    int q = lo ? Gp[J+1] : Gp[J+1]-1;
+    for ( ; p < q; p++) x[Gi[p]] -= Gx[p] * x[j];
+   }
+   
+   return top;
+ }
 };
 
 #endif
