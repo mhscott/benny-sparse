@@ -248,24 +248,24 @@ return 0;
  /// C++ implementation of cs_compress on page 13
  /// @param void
  /// @return new benny_sparse object -- calling object should delete
- benny_sparse* benny_compress(void) {
+ benny_sparse* benny_compress(void)
+ {
    if (!is_triplet()) return 0; // Already compressed
 
+   int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
    benny_sparse *C = new benny_sparse(*this);
 
    int *w = new int[n];
    for (int i = 0; i < n; i++) w[i] = 0;
    for (int k = 0; k < nz; k++) w[p[k]]++;
 
-   int *Cp = C->p;
+   int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
    benny_cumsum(Cp, w, n);
 
-   int *Ci = C->i;
-   double *Cx = C->x;
    int p;
    for (int k = 0; k < nz; k++) {
-     Ci[p = w[this->p[k]]++] = this->i[k];
-     if (Cx != 0) Cx[p] = this->x[k];
+     Ci[p = w[Ap[k]]++] = Ai[k];
+     if (Cx != 0) Cx[p] = Ax[k];
    }
 
    C->nz = -1;
@@ -273,6 +273,33 @@ return 0;
    delete [] w;
 
    return C;
+ }
+
+ benny_sparse* benny_transpose(bool values = true)
+ {
+  if (!is_csc()) return 0;
+
+  int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
+  benny_sparse *C = new benny_sparse(this->m, this->n, Ap[n], values && Ax != 0, false);
+
+  int *w = new int[n];
+  for (int i = 0; i < n; i++) w[i] = 0;
+
+  int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
+  for (int p = 0; p < Ap[n]; p++) w[Ai[p]]++;
+  benny_cumsum(Cp, w, m);
+
+  int q;
+  for (int j = 0; j < n; j++) {
+    for (int p = Ap[j]; p < Ap[j+1]; p++) {
+      Ci[q = w[Ai[p]]++] = j;
+      if (Cx != 0) Cx[q] = Ax[p];
+    }
+  }
+
+  delete [] w;
+
+  return C;
  }
 
  /// @brief Combines duplicate entires in a compressed matrix
@@ -503,6 +530,34 @@ public:
   delete [] w;
 
   return parent;
+ }
+
+ /// @brief C++ implementation of cs_ereach on page 43
+ /// @param k 
+ /// @param parent 
+ /// @param s 
+ /// @param w 
+ /// @return 
+ int benny_ereach(int k, const int *parent, int *s, int *w)
+ {
+  if (!is_csc() || parent == 0 || s == 0 || w == 0) return -1;
+
+  int top = n;
+  int *Ap = this->p; int *Ai = this->i;
+  benny_mark(w,k);
+  for (int p = Ap[k]; p < Ap[k+1]; p++) {
+    int i = Ai[p];
+    if (i > k) continue;
+    int len;
+    for (len = 0; !benny_marked(w,i); i = parent[i]) {
+      s[len++] = i;
+      benny_mark(w,i);
+    }
+    while (len > 0) s[--top] = s[--len];
+  }
+  for (int p = top; p < n; p++) benny_mark(w,s[p]);
+  benny_mark(w,k);
+  return top;
  }
 };
 
