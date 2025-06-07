@@ -465,6 +465,45 @@ private:
    
    return top;
  }
+
+public:
+ /// @brief C++ implementation of cs_etree on page 42
+ /// @param ata true - elimination tree of Cholesky factorization of A'*A
+ /// false - elimination tree of Cholesky factorization of A
+ /// @return new elimination tree array -- calling object should delete
+ int* benny_etree(bool ata = false)
+ {
+  if (!is_csc()) return 0;
+
+  int *Ap = this->p;
+  int *Ai = this->i;
+
+  int *parent = new int[n];
+  int *w = new int[n + (ata ? m : 0)];
+
+  int *ancestor = w;
+  int *prev = w + n;
+
+  if (ata) for (int i = 0; i < m; i++) prev[i] = -1;
+  for (int k = 0; k < n; k++) {
+    parent[k] = -1;
+    ancestor[k] = -1;
+    for (int p = Ap[k]; p < Ap[k+1]; p++) {
+      int i = ata ? prev[Ai[p]] : Ai[p];
+      int inext;
+      for ( ; i != -1 && i < k; i = inext) {
+        inext = ancestor[i];
+        ancestor[i] = k;
+        if (inext == -1) parent[i] = k;
+      }
+      if (ata) prev[Ai[p]] = k;
+    }
+  }
+
+  delete [] w;
+
+  return parent;
+ }
 };
 
 #endif
