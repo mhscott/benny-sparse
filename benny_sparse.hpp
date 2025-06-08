@@ -57,6 +57,22 @@ public:
  int ncols(void) const {return n;}
  int ntriplets(void) const {return nz;}
 
+ /// @brief Query a value from compressed matrix (mainly for testing)
+ /// @param r Row index, 0-based
+ /// @param c Column index, 0-based
+ /// @return A(r,c) value if present, otherwise 0.0
+ /// Also returns zero if matrix not compressed or r or c out of bounds
+ double value(int r, int c) const
+ {
+  if (!is_csc() || r+1 > m || c+1 > n) return 0.0;
+
+  for (int j = p[c]; j < p[c+1]; j++) {
+    if (i[j] == r) return x[j];
+  }
+
+  return 0.0;
+}
+
  /// @brief Print the matrix in triplet or compressed format, C++ implementation of cs_print on page 23
  /// @param brief - limits the amount of printing for large matrices
  /// @return 0 success, < 0 failure
@@ -101,7 +117,7 @@ public:
  /// @param nzmax
  /// @param values 
  /// @param triplet 
- benny_sparse(int m, int n, int nzmax, bool values = true, bool triplet = true):
+ benny_sparse(int m, int n, int nzmax = 1, bool values = true, bool triplet = true):
  nzmax(nzmax),m(m),n(n),p(0),i(0),x(0),nz(0)
  {
   if (nzmax < 1) nzmax = 1;
@@ -410,6 +426,7 @@ private:
  bool benny_marked(int *w, int j) {return w[j] < 0;}
  void benny_mark(int *w, int j) {w[j] = benny_flip(w[j]);}
 
+ public:
  /// @brief C++ implementation of cs_reach function on page 33
  /// @param G 
  /// @param B 
@@ -558,6 +575,64 @@ public:
   for (int p = top; p < n; p++) benny_mark(w,s[p]);
   benny_mark(w,k);
   return top;
+ }
+
+private:
+ /// @brief Depth-first search of a tree, C++ implementation of cs_tdfs on page 45
+ /// @param j 
+ /// @param k 
+ /// @param head 
+ /// @param next 
+ /// @param post 
+ /// @param stack 
+ /// @return 
+ int benny_tdfs(int j, int k, int *head, const int *next, int *post, int *stack)
+ {
+  if (head == 0 || next == 0 || post == 0 || stack == 0) return -1;
+
+  int top = 0;
+  stack[0] = j;
+  while (top >= 0) {
+    int p = stack[top];
+    int i = head[p];
+    if (i == -1) {
+      top--;
+      post[k++] = p;
+    }
+    else {
+      head[p] = next[i];
+      stack[++top] = i;
+    }
+  }
+  return k;
+ }
+
+ /// @brief Postorder a tree, C++ implementation of cs_post on page 45
+ /// @param parent 
+ /// @param n 
+ /// @return new postorder array -- calling object should delete
+ int *benny_post(const int *parent, int n)
+ {
+   if (parent == 0) return 0;
+   
+   int *post = new int[n];
+   int *w = new int[3*n];
+   int *head = w; int *next = w+n; int *stack = w+2*n;
+   for (int j = 0; j < n; j++) head[j] = -1;
+   for (int j = n-1; j >= 0; j--) {
+     if (parent[j] == -1) continue;
+     next[j] = head[parent[j]];
+     head[parent[j]] = j;
+   }
+   int k = 0;
+   for (int j = 0; j < n; j++) {
+     if (parent[j] != -1) continue;
+     k = benny_tdfs(j, k, head, next, post, stack);
+   }
+
+   delete [] w;
+
+   return post;
  }
 };
 
