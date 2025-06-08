@@ -7,6 +7,13 @@
 #include <sstream>
 #include <cmath>
 
+#define BENNY_MAX(a,b) (((a) > (b)) ? (a) : (b))
+#define BENNY_MIN(a,b) (((a) < (b)) ? (a) : (b))
+#define BENNY_FLIP(i) (-(i)-2)
+#define BENNY_UNFLIP(i) (((i) < 0) ? BENNY_FLIP(i) : (i))
+#define BENNY_MARKED(w,j) (w[j] < 0)
+#define BENNY_MARK(w,j) {w[j] = BENNY_FLIP(w[j]); }
+
 using namespace std;
 
 class benny_sparse {
@@ -260,6 +267,49 @@ return 0;
   return C;
  }
 
+ benny_sparse *benny_symperm(const int *pinv, bool values = true)
+ {
+  if (!is_csc()) return 0;
+
+  int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
+  benny_sparse *C = new benny_sparse(m, n, Ap[n], values && Ax != 0, false);
+  if (C == 0) {
+    std::cerr << "benny_symperm - ran out of memory creating C" << std::endl;
+    return 0;
+  }
+  int *w = new int[n];
+  if (w == 0) {
+    std::cerr << "benny_symperm - ran out of memory creating w" << std::endl;
+    return 0;
+  }
+  int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
+  for (int j = 0; j < n; j++) {
+    int j2 = pinv ? pinv[j] : j;
+    for (int p = Ap[j]; p < Ap[j+1]; p++) {
+      int i = Ai[p];
+      if (i > j) continue;
+      int i2 = pinv ? pinv[i] : i;
+      w[BENNY_MAX(i2,j2)]++;
+    }
+  }
+  benny_cumsum(Cp, w, n);
+  for (int j = 0; j < n; j++) {
+    int j2 = pinv ? pinv[j] : j;
+    for (int p = Ap[j]; p < Ap[j+1]; p++) {
+      int i = Ai[p];
+      if (i > j) continue;
+      int i2 = pinv ? pinv[i] : i;
+      int q;
+      Ci[q = w[BENNY_MAX(i2,j2)]++] = BENNY_MIN(i2,j2);
+      if (Cx != 0) Cx[q] = Ax[p];
+    }
+  }
+
+  delete [] w;
+
+  return C;
+ }
+
  /// @brief Transforms triplets into compressed matrix format
  /// C++ implementation of cs_compress on page 13
  /// @param void
@@ -269,7 +319,7 @@ return 0;
    if (!is_triplet()) return 0; // Already compressed
 
    int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
-   benny_sparse *C = new benny_sparse(*this);
+   benny_sparse *C = new benny_sparse(m, n, nz, Ax != 0, false);
 
    int *w = new int[n];
    for (int i = 0; i < n; i++) w[i] = 0;
@@ -421,10 +471,6 @@ return 0;
  } 
 
 private:
- int benny_flip(int i) {return -i-2;}
- int benny_unflip(int i) {return (i < 0) ? benny_flip(i) : i;}
- bool benny_marked(int *w, int j) {return w[j] < 0;}
- void benny_mark(int *w, int j) {w[j] = benny_flip(w[j]);}
 
  public:
  /// @brief C++ implementation of cs_reach function on page 33
@@ -441,8 +487,8 @@ private:
    int n = G->n; int *Bp = B->p; int *Bi = B->i; int *Gp = G->p;
    int top = G->n;
    for (int p = Bp[k]; p < Bp[k+1]; p++)
-     if (!benny_marked(Gp,Bi[p])) top = benny_dfs(Bi[p],G,top,xi,xi+n,pinv);
-   for (int p = top; p < n; p++) benny_mark(Gp, xi[p]);
+     if (!BENNY_MARKED(Gp,Bi[p])) top = benny_dfs(Bi[p],G,top,xi,xi+n,pinv);
+   for (int p = top; p < n; p++) BENNY_MARK(Gp, xi[p]);
 
    return top;
  }
@@ -465,15 +511,15 @@ private:
    while (head >= 0) {
     j = xi[head];
     int jnew = (pinv != 0) ? pinv[j] : j;
-    if (!benny_marked(Gp,j)) {
-      benny_mark(Gp,j);
-      pstack[head] = (jnew < 0) ? 0 : benny_unflip(Gp[jnew]);
+    if (!BENNY_MARKED(Gp,j)) {
+      BENNY_MARK(Gp,j);
+      pstack[head] = (jnew < 0) ? 0 : BENNY_UNFLIP(Gp[jnew]);
     } 
     bool done = true;
-    int p2 = (jnew < 0) ? 0 : benny_unflip(Gp[jnew+1]);
+    int p2 = (jnew < 0) ? 0 : BENNY_UNFLIP(Gp[jnew+1]);
     for (int p = pstack[head]; p < p2; p++) {
       int i = Gi[p];
-      if (benny_marked(Gp,i)) continue;
+      if (BENNY_MARKED(Gp,i)) continue;
       pstack[head] = p;
       xi[++head] = i;
       done = false;
@@ -561,19 +607,19 @@ public:
 
   int top = n;
   int *Ap = this->p; int *Ai = this->i;
-  benny_mark(w,k);
+  BENNY_MARK(w,k);
   for (int p = Ap[k]; p < Ap[k+1]; p++) {
     int i = Ai[p];
     if (i > k) continue;
     int len;
-    for (len = 0; !benny_marked(w,i); i = parent[i]) {
+    for (len = 0; !BENNY_MARKED(w,i); i = parent[i]) {
       s[len++] = i;
-      benny_mark(w,i);
+      BENNY_MARK(w,i);
     }
     while (len > 0) s[--top] = s[--len];
   }
-  for (int p = top; p < n; p++) benny_mark(w,s[p]);
-  benny_mark(w,k);
+  for (int p = top; p < n; p++) BENNY_MARK(w,s[p]);
+  BENNY_MARK(w,k);
   return top;
  }
 
@@ -607,6 +653,7 @@ private:
   return k;
  }
 
+public:
  /// @brief Postorder a tree, C++ implementation of cs_post on page 45
  /// @param parent 
  /// @param n 
@@ -633,6 +680,160 @@ private:
    delete [] w;
 
    return post;
+ }
+
+private:
+ /// @brief Find level and first descendant of a node in an elimination tree
+ /// C++ implmentation of firstdesc on page 47
+ /// @param n 
+ /// @param parent 
+ /// @param post 
+ /// @param first 
+ /// @param level 
+ void benny_firstdesc(int n, int *parent, int *post, int *first, int *level)
+ {
+   for (int i = 0; i < n; i++) first[i] = -1;
+   for (int k = 0; k < n; k++) {
+     int i = post[k];
+     int len = 0;
+     int r;
+     for (r = i; r != -1 && first[r] == -1; r = parent[r], len++) first[r] = k;
+     len += (r == -1) ? -1 : level[r];
+     for (int s = i; s != r; s = parent[s]) level[s] = len--;
+   }  
+ }
+
+ /// @brief C++ implementation of cs_leaf on page 51
+ /// @param i 
+ /// @param j 
+ /// @param first 
+ /// @param maxfirst 
+ /// @param prevleaf 
+ /// @param ancestor 
+ /// @param jleaf 
+ /// @return 
+ int benny_leaf(int i, int j, const int *first, int *maxfirst, int *prevleaf, int *ancestor, int *jleaf)
+ {
+  if (first == 0 || maxfirst == 0 || prevleaf == 0 || ancestor == 0 || jleaf == 0) return -1;
+
+  *jleaf = 0;
+  if (i <= j || first[j] <= maxfirst[i]) return -1;
+  maxfirst[i] = first[j];
+  int jprev = prevleaf[i];
+  prevleaf[i] = j;
+  *jleaf = (jprev == -1) ? 1 : 2;
+  if (*jleaf == 1) return i;
+  int q;
+  for (q = jprev; q != ancestor[q]; q = ancestor[q]) {}
+  int sparent;
+  for (int s = jprev; s != q; s = sparent) {
+    sparent = ancestor[s];
+    ancestor[s] = q;
+  }
+
+  return q;
+ }
+
+public:
+ int *benny_rowcnt(int *parent, int *post)
+ {
+  int *Ap = this->p; int *Ai = this->i;
+  int *w = new int[5*n];
+  int *ancestor = w;
+  int *maxfirst = w+n;
+  int *prevleaf = w+2*n;
+  int *first = w+3*n;
+  int *level = w+4*n;
+
+  int *rowcount = new int[n];
+
+  benny_firstdesc(n, parent, post, first, level);
+
+  for (int i = 0; i < n; i++) {
+    rowcount[i] = 1;
+    prevleaf[i] = -1;
+    maxfirst[i] = -1;
+    ancestor[i] = i;
+  }
+  for (int k = 0; k < n; k++) {
+    int j = post[k];
+    for (int p = Ap[j]; p < Ap[j+1]; p++) {
+      int i = Ai[p];
+      int jleaf;
+      int q = benny_leaf(i,j,first,maxfirst,prevleaf,ancestor,&jleaf);
+      if (jleaf != 0) rowcount[i] += level[j] - level[q];
+    }
+    if (parent[j] != -1) ancestor[j] = parent[j];
+  }
+
+  delete [] w;
+
+  return rowcount;
+ }
+
+private:
+ void init_ata(const int *post, int *w, int **head, int **next)
+ {
+  int *ATp = this->p; int *ATi = this->i;
+  *head = w+4*n; *next = w+5*n+1;
+  for (int k = 0; k < n; k++) w[post[k]] = k;
+  for (int i = 0; i < n; i++) {
+    int k = n, p;
+    for (int p = ATp[i]; p < ATp[i+1]; p++) k = (k <= w[ATi[p]]) ? k : w[ATi[p]];
+    (*next)[i] = (*head)[k];
+    (*head)[k] = i;
+  }
+ }
+
+public:
+ int *benny_counts(const int *parent, const int *post, bool ata = false)
+ {
+  if (!is_csc() || parent == 0 || post == 0) return 0;
+
+  int s = 4*n + (ata ? n+m+1 : 0);
+  int *colcount = new int[n];
+  int *delta = colcount;
+  int *w = new int[s];
+  benny_sparse *AT = this->benny_transpose(false);
+
+  int *ancestor = w;
+  int *maxfirst = w+n;
+  int *prevleaf = w+2*n;
+  int *first = w+3*n;
+  for (int k = 0; k < s; k++) w[k] = -1;
+  for (int k = 0; k < n; k++) {
+    int j = post[k];
+    delta[j] = (first[j] == -1) ? 1 : 0;
+    for ( ; j != -1 && first[j] == -1; j = parent[j]) first[j] = k;
+  }
+
+  int *ATp = AT->p; int *ATi = AT->i;
+
+  int *head = 0;
+  int *next = 0;
+  if (ata) AT->init_ata(post, w, &head, &next);
+  for (int i = 0; i < n; i++) ancestor[i] = i;
+  for (int k = 0; k < n; k++) {
+    int j = post[k];
+    if (parent[j] != -1) delta[parent[j]]--;
+    for (int J = ata ? head[k] : j; J != -1; J = ata ? next[J] : -1) {
+      for (int p = ATp[J]; p < ATp[J+1]; p++) {
+        int i = ATi[p];
+        int jleaf;
+        int q = benny_leaf(i, j, first, maxfirst, prevleaf, ancestor, &jleaf);
+        if (jleaf >= 1) delta[j]++;
+        if (jleaf == 2) delta[q]--;
+      }
+    }
+    if (parent[j] != -1) ancestor[j] = parent[j];
+  }
+
+  for (int j = 0; j < n; j++) if (parent[j] != -1) colcount[parent[j]] += colcount[j];
+
+  delete AT;
+  delete [] w;
+
+  return colcount;
  }
 };
 
