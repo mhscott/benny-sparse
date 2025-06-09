@@ -4,7 +4,7 @@ BennySparse is a C++ implementation of the sparse linear equation solver
 presented by Timothy A. Davis in 
 [_Direct Methods for Sparse Linear Systems_](https://epubs.siam.org/doi/book/10.1137/1.9780898718881).
 
-[YouTube playlist](https://youtube.com/playlist?list=PL5EvFKC69QIyRLFuxWRnH6hIw6e1-bBXB&si=M_UYPH-BalISK5Zw) of lectures from the book.
+[YouTube playlist](https://youtube.com/playlist?list=PL5EvFKC69QIyRLFuxWRnH6hIw6e1-bBXB) of lectures from the book.
 
 ## Minimal Examples
 
