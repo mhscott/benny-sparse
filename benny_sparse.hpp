@@ -32,14 +32,14 @@ private:
 
   // Resize the row index vector
   int *newi = new int[newnzmax];
-  for (int i = 0; i < nzmax; i++) newi[i] = this->i[i];
+  for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newi[i] = this->i[i];
   delete [] this->i;
   this->i = newi;
 
   // Resize the column index vector
   if (is_triplet()) {
     int *newp = new int[newnzmax];
-    for (int i = 0; i < nzmax; i++) newp[i] = this->p[i];
+    for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newp[i] = this->p[i];
     delete [] this->p;
     this->p = newp;
   }
@@ -47,7 +47,7 @@ private:
   // Resize the values vector
   if (this->x != 0) {
     double *newx = new double[newnzmax];
-    for (int i = 0; i < nzmax; i++) newx[i] = this->x[i];
+    for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newx[i] = this->x[i];
     delete [] this->x;
     this->x = newx;
   }
@@ -215,6 +215,64 @@ for (int j = 0; j < n; j++)
 
 return 0;
 }
+
+ int benny_scatter(int j, double beta, int *w, double *x, int mark, benny_sparse *C, int nz)
+ {
+  if (!is_csc() || w == 0 || !C->is_csc()) return -1;
+
+  int *Ap = p; int *Ai = i; double *Ax = this->x; int *Ci = C->i;
+  for (int p = Ap[j]; p < Ap[j+1]; p++) {
+    int i = Ai[p];
+    if (w[i] < mark) {
+      w[i] = mark;
+      Ci[nz++] = i;
+      if (x != 0) x[i] = beta*Ax[p];
+    }
+    else {
+      if (x != 0) x[i] += beta*Ax[p];
+    }
+  }
+
+  return nz;
+ }
+
+ benny_sparse *benny_multiply(const benny_sparse *B)
+ {
+  if (!is_csc() || !B->is_csc()) return 0;
+
+  int anz = p[n];
+  int *Bp = B->p; int *Bi = B->i; double *Bx = B->x; int bnz = Bp[B->n];
+  int *w = new int[m];
+  for (int i = 0; i < m; i++) w[i] = 0;
+  bool values = (this->x != 0) && (Bx != 0);
+  double *x = values ? new double[m] : 0;
+  benny_sparse *C = new benny_sparse(m, B->n, anz + bnz, values, false);
+  int *Cp = C->p;
+  int nz = 0;
+  for (int j = 0; j < n; j++) {
+    if (nz + m > C->nzmax && !C->benny_sprealloc(2*(C->nzmax)+m)) {
+      delete [] w;
+      delete [] x;
+      delete C;
+      return 0;
+    }
+    int *Ci = C->i; double *Cx = C->x;
+    Cp[j] = nz;
+    for (int p = Bp[j]; p < Bp[j+1]; p++) {
+      nz = this->benny_scatter(Bi[p], Bx ? Bx[p] : 1, w, x, j+1, C, nz);
+    }
+    if (values) {
+      for (int p = Cp[j]; p < nz; p++) Cx[p] = x[Ci[p]];
+    }
+  }
+  Cp[n] = nz;
+  C->benny_sprealloc(0);
+
+  delete [] w;
+  delete [] x;
+
+  return C;
+ }
 
  /// @brief Add an entry to this matrix
  /// @param r 
