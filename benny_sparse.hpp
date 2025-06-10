@@ -204,6 +204,18 @@ public:
    if (x != 0) delete [] x;
  }
 
+ double benny_norm()
+ {
+   if (!is_csc() || x == 0) return -1.0;
+   double norm = 0.0;
+   for (int j = 0; j < n; j++) {
+    double s = 0.0;
+    for (int p = this->p[j]; p < this->p[j+1]; p++) s += fabs(this->x[p]);
+    norm = BENNY_MAX(norm, s);
+   }
+   return norm;
+ }
+
  /// @brief Compute y = A*x + y where A is this matrix
  int benny_gaxpy(const double *x, double *y) const
 {
@@ -216,7 +228,7 @@ for (int j = 0; j < n; j++)
 return 0;
 }
 
- int benny_scatter(int j, double beta, int *w, double *x, int mark, benny_sparse *C, int nz)
+ int benny_scatter(int j, double beta, int *w, double *x, int mark, benny_sparse *C, int nz) const
  {
   if (!is_csc() || w == 0 || !C->is_csc()) return -1;
 
@@ -236,6 +248,36 @@ return 0;
   return nz;
  }
 
+ benny_sparse *benny_add(const benny_sparse *B, double alpha, double beta)
+ {
+  if (!is_csc() | !B->is_csc()) return 0;
+
+  int anz = p[n];
+  int *Bp = B->p; int *Bi = B->i; double *Bx = B->x; int bnz = Bp[B->n];
+  int *w = new int[m];
+  for (int i = 0; i < m; i++) w[i] = 0;
+  bool values = (this->x != 0) && (Bx != 0);
+  double *x = values ? new double[m] : 0;
+  benny_sparse *C = new benny_sparse(m, B->n, anz + bnz, values, false);
+  int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
+  int nz = 0;
+  for (int j = 0; j < B->n; j++) {
+    Cp[j] = nz;
+    nz = this->benny_scatter(j, alpha, w, x, j+1, C, nz);
+    nz = B->benny_scatter(j, beta, w, x, j+1, C, nz);
+    if (values) {
+      for (int p = Cp[j]; p < nz; p++) Cx[p] = x[Ci[p]];
+    }
+  }
+  Cp[B->n] = nz;
+  C->benny_sprealloc(0);
+
+  delete [] w;
+  delete [] x;
+
+  return C;
+ }
+
  benny_sparse *benny_multiply(const benny_sparse *B)
  {
   if (!is_csc() || !B->is_csc()) return 0;
@@ -249,7 +291,7 @@ return 0;
   benny_sparse *C = new benny_sparse(m, B->n, anz + bnz, values, false);
   int *Cp = C->p;
   int nz = 0;
-  for (int j = 0; j < n; j++) {
+  for (int j = 0; j < B->n; j++) {
     if (nz + m > C->nzmax && !C->benny_sprealloc(2*(C->nzmax)+m)) {
       delete [] w;
       delete [] x;
@@ -265,7 +307,7 @@ return 0;
       for (int p = Cp[j]; p < nz; p++) Cx[p] = x[Ci[p]];
     }
   }
-  Cp[n] = nz;
+  Cp[B->n] = nz;
   C->benny_sprealloc(0);
 
   delete [] w;
@@ -305,7 +347,7 @@ return 0;
  /// @param q Column permutation vector
  /// @param values Boolean on whether or not to copy values (default = true)
  /// @return new benny_sparse object -- calling object should delete
- benny_sparse* benny_permute(const int *pinv, const int *q, bool values = true)
+ benny_sparse *benny_permute(const int *pinv, const int *q, bool values = true)
  {
   if (!is_csc()) return 0; // Not compressed
 
@@ -372,7 +414,7 @@ return 0;
  /// C++ implementation of cs_compress on page 13
  /// @param void
  /// @return new benny_sparse object -- calling object should delete
- benny_sparse* benny_compress(void)
+ benny_sparse *benny_compress(void)
  {
    if (!is_triplet()) return 0; // Already compressed
 
@@ -399,7 +441,7 @@ return 0;
    return C;
  }
 
- benny_sparse* benny_transpose(bool values = true)
+ benny_sparse *benny_transpose(bool values = true)
  {
   if (!is_csc()) return 0;
 
@@ -619,7 +661,7 @@ public:
  /// @param ata true - elimination tree of Cholesky factorization of A'*A
  /// false - elimination tree of Cholesky factorization of A
  /// @return new elimination tree array -- calling object should delete
- int* benny_etree(bool ata = false)
+ int *benny_etree(bool ata = false)
  {
   if (!is_csc()) return 0;
 
