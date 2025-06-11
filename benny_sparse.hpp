@@ -1,8 +1,6 @@
 #ifndef BENNY_SPARSE_HPP
 #define BENNY_SPARSE_HPP
 
-#include "benny_utility.hpp"
-
 #include <iostream>
 #include <sstream>
 #include <cmath>
@@ -15,6 +13,42 @@
 #define BENNY_MARK(w,j) {w[j] = BENNY_FLIP(w[j]); }
 
 using namespace std;
+
+class benny_sparse;
+
+class benny_numeric {
+ private:
+  benny_sparse *L;
+  benny_sparse *U;
+  int *pinv;
+  double *B;
+ public:
+  benny_numeric():L(0), U(0), pinv(0), B(0) {}
+  ~benny_numeric();
+  friend class benny_sparse;
+};
+
+class benny_symbolic {
+ private:
+  int *pinv;
+  int *q;
+  int *parent;
+  int *cp;
+  int *leftmost;
+  int n2;
+  double lnz;
+  double unz;
+ public:
+  benny_symbolic():pinv(0), q(0), parent(0), cp(0), leftmost(0), n2(0), lnz(0.0), unz(0.0) {}
+  ~benny_symbolic() {
+    if (pinv != 0) delete [] pinv;
+    if (q != 0) delete [] q;
+    if (parent != 0) delete [] parent;
+    if (cp != 0) delete [] cp;
+    if (leftmost != 0) delete [] leftmost;
+  }
+  friend class benny_sparse;    
+};
 
 class benny_sparse {
 private:
@@ -341,6 +375,44 @@ return 0;
    return 0;
  }
 
+ static double benny_cumsum(int *p, int *c, int n)
+{
+  if (p == 0 || c == 0) return -1;
+
+  int nz = 0;
+  double nz2 = 0.0;
+  for (int i = 0; i < n; i++) {
+    p[i] = nz;
+    nz += c[i];
+    nz2 += c[i];
+    c[i] = p[i];
+  }
+  p[n] = nz;
+  
+  return nz2;
+}
+ 
+static int benny_pvec(const int *p, const double *b, double *x, int n)
+{
+  if (x == 0 || b == 0) return -1;
+  for (int k = 0; k < n; k++) x[k] = b[p ? p[k] : k];
+  return 0;
+}
+
+static int benny_ipvec(const int *p, const double *b, double *x, int n)
+{
+  if (x == 0 || b == 0) return -1;
+  for (int k = 0; k < n; k++) x[p ? p[k] : k] = b[k];
+  return 0;
+}
+
+static int* benny_pinv(const int *p, int n)
+{
+  int *pinv = new int[n];
+  for (int k = 0; k < n; k++) pinv[p[k]] = k;
+  return pinv;
+}
+
  /// @brief Permute a sparse matrix, C=P*A*Q
  /// C++ implementation of cs_permute on page 21
  /// @param pinv Inverse row permutation vector
@@ -372,7 +444,7 @@ return 0;
   if (!is_csc()) return 0;
 
   int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
-  benny_sparse *C = new benny_sparse(m, n, Ap[n], values && Ax != 0, false);
+  benny_sparse *C = new benny_sparse(n, n, Ap[n], values && Ax != 0, false);
   if (C == 0) {
     std::cerr << "benny_symperm - ran out of memory creating C" << std::endl;
     return 0;
@@ -382,6 +454,7 @@ return 0;
     std::cerr << "benny_symperm - ran out of memory creating w" << std::endl;
     return 0;
   }
+  for (int i = 0; i < n; i++) w[i] = 0;
   int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
   for (int j = 0; j < n; j++) {
     int j2 = pinv ? pinv[j] : j;
@@ -935,6 +1008,131 @@ public:
 
   return colcount;
  }
+
+public:
+
+ benny_symbolic *benny_schol(int order)
+ {
+  if (!is_csc()) return 0;
+
+  benny_symbolic *S = new benny_symbolic();
+
+  // Natural ordering
+  int *P = new int[this->n];
+  for (int i = 0; i < this->n; i++) P[i] = i;
+
+  S->pinv = benny_pinv(P, this->n);
+  delete [] P;
+  if (order != 0 && S->pinv == 0) {
+    delete S;
+    return 0;
+  }
+  benny_sparse *C = this->benny_symperm(S->pinv, false);
+  S->parent = C->benny_etree(false);
+  int *post = benny_post(S->parent, this->n);
+  int *c = C->benny_counts(S->parent, post, false);
+  delete [] post;
+  delete C;
+  S->cp = new int[n+1];
+  S->unz = S->lnz = benny_cumsum(S->cp, c, n);
+  delete [] c;
+
+  if (S->lnz >= 0) return S;
+  else {
+    delete S;
+    return 0;
+  }
+ }
+
+ benny_numeric *benny_chol(const benny_symbolic *S)
+ {
+   if (!is_csc() || S == 0 || S->cp == 0 || S->parent == 0) return 0;
+
+  benny_numeric *N = new benny_numeric();
+  int *c = new int[2*n];
+  double *x = new double[n];
+
+  int *cp = S->cp; int *pinv = S->pinv; int *parent = S->parent;
+  benny_sparse *C = pinv ? this->benny_symperm(pinv, true) : this;
+  benny_sparse *E = pinv ? C : 0;
+  int *s = c+n;
+  int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
+  
+  benny_sparse *L;
+  N->L = L = new benny_sparse(n, n, cp[n], true, false);
+  int *Lp = L->p; int *Li = L->i; double *Lx = L->x;
+  for (int k = 0; k < n; k++) Lp[k] = c[k] = cp[k];
+  for (int k = 0; k < n; k++) {
+    // Non-zero pattern of L(k,:)
+    int top = C->benny_ereach(k, parent, s, c);
+    x[k] = 0.0;
+    for (int p = Cp[k]; p < Cp[k+1]; p++) {
+      if (Ci[p] <= k) x[Ci[p]] = Cx[p];
+    }
+    double d = x[k];
+    x[k] = 0.0;
+
+    // Triangular solve
+    for ( ; top < n; top++) {
+      int i = s[top];
+      double lki = x[i] / Lx[Lp[i]];
+      x[i] = 0.0;
+      for (int p = Lp[i]+1; p < c[i]; p++) x[Li[p]] -= Lx[p]*lki;
+      d -= lki*lki;
+      int p = c[i]++;
+      Li[p] = k;
+      Lx[p] = lki;
+    }
+
+    // Compute L(k,k
+    if (d <= 0.0) {
+      delete E;
+      delete [] c;
+      delete [] x;
+      delete N;
+      return 0;
+    }
+    int p = c[k]++;
+    Li[p] = k;
+    Lx[p] = sqrt(d);
+  }
+  Lp[n] = cp[n];
+
+  delete E;
+  delete [] c;
+  delete [] x;
+
+  return N;
+ }
+
+ int benny_cholsol(int order, double *b)
+ {
+  if (!is_csc() || b == 0) return -1;
+
+  benny_symbolic *S = this->benny_schol(order);
+  benny_numeric *N = this->benny_chol(S);
+  double *x = new double[n];
+  bool ok = S != 0 && N != 0 && x != 0;
+  if (ok) {
+    benny_ipvec(S->pinv, b, x, n); // x = P*b
+    N->L->benny_lsolve(x); // x = L\x
+    N->L->benny_ltsolve(x); // x= L'\x
+    benny_pvec(S->pinv, x, b, n); // b = P'*x
+  }
+
+  delete [] x;
+  delete S;
+  delete N;
+
+  return ok ? 0 : -1;
+ }
 };
 
+// Down here to get rid of a compiler warning
+benny_numeric::~benny_numeric() {
+    if (L != 0) delete L;
+    if (U != 0) delete U;
+    if (pinv != 0) delete [] pinv;
+    if (B != 0) delete [] B;
+}
 #endif
