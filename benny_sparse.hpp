@@ -25,7 +25,7 @@ class benny_numeric {
  public:
   benny_numeric():L(0), U(0), pinv(0), B(0) {}
   ~benny_numeric();
-  friend class benny_sparse;
+ friend class benny_sparse;
 };
 
 class benny_symbolic {
@@ -47,7 +47,7 @@ class benny_symbolic {
     if (cp != 0) delete [] cp;
     if (leftmost != 0) delete [] leftmost;
   }
-  friend class benny_sparse;    
+ friend class benny_sparse;    
 };
 
 class benny_sparse {
@@ -236,6 +236,19 @@ public:
    if (p != 0) delete [] p;
    if (i != 0) delete [] i;
    if (x != 0) delete [] x;
+ }
+
+ int benny_clear_triplets()
+ {
+  if (!is_triplet()) return 0;
+  
+  this->benny_sprealloc(1);
+  this->nz = 0;
+
+  this->m = 0;
+  this->n = 0;
+
+  return 0;
  }
 
  double benny_norm()
@@ -720,9 +733,9 @@ private:
     int j = xi[px];
     int J = (pinv != 0) ? pinv[j] : j;
     if (J < 0) continue;
-    x[j] /= Gx[lo ? Gp[J] : Gp[J+1]-1];
-    int p = lo ? Gp[J]+1 : Gp[J];
-    int q = lo ? Gp[J+1] : Gp[J+1]-1;
+    x[j] /= Gx[lo ? Gp[J] : (Gp[J+1]-1)];
+    int p = lo ? (Gp[J]+1) : Gp[J];
+    int q = lo ? Gp[J+1] : (Gp[J+1]-1);
     for ( ; p < q; p++) x[Gi[p]] -= Gx[p] * x[j];
    }
    
@@ -1044,6 +1057,36 @@ public:
   }
  }
 
+ benny_symbolic *benny_sqr(int order, bool qr = false)
+ {
+   if (!is_csc()) return 0;
+
+   benny_symbolic *S = new benny_symbolic();
+
+   // Natural ordering
+   S->q = new int[n];
+   for (int i = 0; i < n; i++) S->q[i] = i;
+
+   if (order && S->q == 0) {
+    delete S;
+    return 0;
+   }
+   int ok = 0;
+   if (qr) {
+    std::cerr << "benny_sqr -- not yet handling QR factorization" << std::endl;
+    ok = -1;
+   }
+   else {
+    S->unz = 4*p[n] + n;
+    S->lnz = S->unz;
+   }
+   if (ok == 0) return S;
+   else {
+    delete S;
+    return 0;
+   }
+ }
+
  benny_numeric *benny_chol(const benny_symbolic *S)
  {
    if (!is_csc() || S == 0 || S->cp == 0 || S->parent == 0) return 0;
@@ -1084,7 +1127,7 @@ public:
       Lx[p] = lki;
     }
 
-    // Compute L(k,k
+    // Compute L(k,k)
     if (d <= 0.0) {
       delete E;
       delete [] c;
@@ -1116,7 +1159,7 @@ public:
   if (ok) {
     benny_ipvec(S->pinv, b, x, n); // x = P*b
     N->L->benny_lsolve(x); // x = L\x
-    N->L->benny_ltsolve(x); // x= L'\x
+    N->L->benny_ltsolve(x); // x = L'\x
     benny_pvec(S->pinv, x, b, n); // b = P'*x
   }
 
@@ -1126,6 +1169,129 @@ public:
 
   return ok ? 0 : -1;
  }
+
+ benny_numeric *benny_lu(const benny_symbolic *S, double tol)
+ {
+  if (!is_csc() || S == 0) return 0;
+
+  benny_numeric *N = new benny_numeric();
+  double *x = new double[n];
+  int *xi = new int[2*n];
+
+  int *q = S->q;
+  int lnz = S->lnz;
+  benny_sparse *L;
+  N->L = L = new benny_sparse(n,n,lnz,1,false);
+
+  int unz = S->unz;
+  benny_sparse *U;
+  N->U = U = new benny_sparse(n,n,unz,1,false);
+
+  int *pinv;
+  N->pinv = pinv = new int[n];
+
+  if (L == 0 || U == 0 || pinv == 0) {
+    delete [] x;
+    delete [] xi;
+    return 0;
+  }
+
+  int *Lp = L->p; int *Up = U->p;
+  for (int i = 0; i < n; i++) x[i] = 0.0;
+  for (int i = 0; i < n; i++) pinv[i] = -1;
+  for (int k = 0; k <= n; k++) Lp[k] = 0;
+  lnz = unz = 0;
+  for (int k = 0; k < n; k++) {
+    // Triangular solve
+    Lp[k] = lnz;
+    Up[k] = unz;
+    if ((lnz + n > L->nzmax && !L->benny_sprealloc(2*L->nzmax + n)) ||
+    (unz + n > U->nzmax && !U->benny_sprealloc(2*U->nzmax + n))) {
+      delete [] x;
+      delete [] xi;
+      return 0;
+    }
+    int *Li = L->i; double *Lx = L->x;
+    int *Ui = U->i; double *Ux = U->x;
+    int col = q ? (q[k]) : k;
+    int top = benny_spsolve(L, this, col, xi, x, pinv, true);
+
+    // Find pivot
+    int ipiv = -1;
+    double a = -1;
+    for (int p = top; p < n; p++) {
+      int i = xi[p];
+      if (pinv[i] < 0) {
+        double t;
+        if ((t = fabs(x[i])) > a) {
+          a = t;
+          ipiv = i;
+        }
+      }
+      else {
+        Ui[unz] = pinv[i];
+        Ux[unz++] = x[i];
+      }
+    }
+    if (ipiv == -1 || a <= 0) {
+      delete [] x;
+      delete [] xi;
+      return 0;
+    }
+    if (pinv[col] < 0 && fabs(x[col]) >= a*tol) ipiv = col;
+
+    // Divide by pivot
+    double pivot = x[ipiv];
+    Ui[unz] = k;
+    Ux[unz++] = pivot;
+    pinv[ipiv] = k;
+    Li[lnz] = ipiv;
+    Lx[lnz++] = 1;
+    for (int p = top; p < n; p++) {
+      int i = xi[p];
+      if (pinv[i] < 0) {
+        Li[lnz] = i;
+        Lx[lnz++] = x[i] / pivot;
+      }
+      x[i] = 0.0;
+    } 
+  }
+
+  Lp[n] = lnz;
+  Up[n] = unz;
+  int *Li = L->i;
+  for (int p = 0; p < lnz; p++) Li[p] = pinv[Li[p]];
+  L->benny_sprealloc(0);
+  U->benny_sprealloc(0);
+
+  delete [] x;
+  delete [] xi;
+
+  return N;
+ }
+
+ int benny_lusol(int order, double *b, double tol)
+ {
+  if (!is_csc() || b == 0) return -1;
+
+  benny_symbolic *S = this->benny_sqr(order, false);
+  benny_numeric *N = this->benny_lu(S, tol);
+  double *x = new double[n];
+  bool ok = S != 0 && N != 0 && x != 0;
+  if (ok) {
+    benny_ipvec(N->pinv, b, x, n); // x = b(p)
+    N->L->benny_lsolve(x); // x = L\x
+    N->U->benny_usolve(x); // x = U\x
+    benny_ipvec(S->q, x, b, n); // b(q) = x
+  }
+
+  delete [] x;
+  delete S;
+  delete N;
+
+  return ok ? 0 : -1;
+ }
+
 };
 
 // Down here to get rid of a compiler warning
