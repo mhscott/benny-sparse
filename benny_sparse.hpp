@@ -388,6 +388,17 @@ return 0;
    return 0;
  }
 
+ /// @brief Set all entries of this compressed matrix to zero
+ /// @return 
+ int benny_zero()
+ {
+  if (!is_csc()) return -1;
+
+  for (int i = 0; x != 0 && i < nz; i++) x[i] = 0.0;
+
+  return 0;
+ }
+
  static double benny_cumsum(int *p, int *c, int n)
 {
   if (p == 0 || c == 0) return -1;
