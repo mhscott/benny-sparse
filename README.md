@@ -6,13 +6,18 @@ presented by Timothy A. Davis in
 
 [YouTube playlist](https://youtube.com/playlist?list=PL5EvFKC69QIyRLFuxWRnH6hIw6e1-bBXB) of lectures from the book.
 
+## Compiling at Command Line
+
+```console
+g++ main.cpp benny_sparse.cpp benny_symbolic.cpp benny_numeric.cpp
+```
+
 ## Minimal Examples
 
 Store a 3x3 matrix in triplet form, then compress.
 
 ```cpp
 #include "benny_sparse.hpp"
-#include "benny_utility.hpp"
 
 int main (int argc, char **argv)
 {
@@ -23,11 +28,11 @@ int main (int argc, char **argv)
   kb.benny_entry(2,1,2.0);
   kb.benny_entry(2,2,4.0);
 
-  kb.benny_print();
+  kb.benny_print(std::cout);
 
   benny_sparse *kbsparse = kb.benny_compress();
 
-  kbsparse->benny_print();
+  kbsparse->benny_print(std::cout);
 
   delete kbsparse;
 
@@ -39,7 +44,6 @@ Load a dense matrix from file, then compress.
 
 ```cpp
 #include "benny_sparse.hpp"
-#include "benny_utility.hpp"
 
 #include <fstream>
 
@@ -49,44 +53,14 @@ int main (int argc, char **argv)
   benny_sparse T(input,false);
   input.close();
   
-  T.benny_print();
+  T.benny_print(std::cout);
 
   benny_sparse *Tc = T.benny_compress();
 
-  Tc->benny_print();
+  Tc->benny_print(std::cout);
 
   delete Tc;
 
   return 0;
 }
-```
-
-## Sparse Matrix Class Definition
-
-```cpp
-class benny_sparse {
- private:
-  int nzmax; // maximum number of entries
-  int m; // number of rows
-  int n; // number of columns
-  int *p; // column pointers
-  int *i; // row indices
-  double *x; // values
-  int nz; // number of entries in triplet matrix  (=-1 if compressed)
-
-  bool is_triplet(void) const {return nz >= 0;}
-  bool is_csc(void) const {return nz == -1;}
-
- public:
-  // Construct m x n matrix with nzmax entries
-  benny_sparse(int m, int n, int nzmax, bool values = true, bool triplet = true);
-  // Construct from input stream, e.g., file of triplets or file of full matrix
-  benny_sparse(std::istream &input, bool triplets = false, double tol = 1e-16, bool minus1 = false):
-  // Copy constructor
-  benny_sparse(const benny_sparse& A);
-  // Default constructor, uses nzmax = 1
-  benny_sparse();
-  // Destructor
-  ~benny_sparse()
-};
 ```
