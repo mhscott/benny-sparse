@@ -46,6 +46,11 @@ private:
  int *benny_rowcnt(int *parent, int *post);
  int *benny_counts(const int *parent, const int *post, bool ata = false);
 
+ int benny_fkeep(bool (*fkeep)(int, int, double, void *), void *other);
+ static bool benny_nonzero(int i, int j, double aij, void *other) {return aij != 0.0;}
+ static bool benny_tol(int i, int j, double aij, void *tol) {return fabs(aij) > *((double *)tol);}
+ static bool benny_diag(int i, int j, double aij, void *other) {return i != j;}
+
 public:
  benny_sparse(int m, int n, int nzmax = 1, bool values = true, bool triplet = true);
  benny_sparse(std::istream &input, bool triplets = false, double tol=1e-16, bool minus1 = false);
@@ -85,7 +90,7 @@ public:
  int benny_zero(void);
  benny_sparse *benny_compress(void);
  int benny_dupl(void);
-
+ 
  double benny_norm(void) const;
  int benny_gaxpy(const double *x, double *y) const;
  int benny_scatter(int j, double beta, int *w, double *x, int mark, benny_sparse *C, int nz) const;
@@ -105,6 +110,7 @@ public:
  static int benny_ipvec(const int *p, const double *b, double *x, int n);
  static int *benny_pinv(const int *p, int n);
 
+ int *benny_amd(int order);
  benny_sparse *benny_permute(const int *pinv, const int *q, bool values = true);
  benny_sparse *benny_symperm(const int *pinv, bool values = true);
 

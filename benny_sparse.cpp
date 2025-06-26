@@ -313,6 +313,27 @@ benny_sparse::benny_dupl(void)
   return this->benny_sprealloc(0);
 }
 
+int
+benny_sparse::benny_fkeep(bool (*fkeep)(int, int, double, void *), void *other)
+{
+  if (!is_csc() || fkeep == 0) return -1;
+
+  int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
+  for (int j = 0; j < n; j++) {
+    int p = Ap[j];
+    Ap[j] = nz;
+    for ( ; p < Ap[j+1]; p++) {
+      if (fkeep(Ai[p], j, Ax ? Ax[p] : 1, other)) {
+        if (Ax != 0) Ax[nz] = Ax[p];
+        Ai[nz++] = Ai[p];
+      }
+    }
+  }
+  Ap[n] = nz;
+  this->benny_sprealloc(0);
+  return nz;
+}
+
 /// @brief Query a value from compressed matrix (mainly for testing)
 /// @param r Row index, 0-based
 /// @param c Column index, 0-based
@@ -592,6 +613,41 @@ benny_sparse::benny_pinv(const int *p, int n)
   return pinv;
 }
 
+int *
+benny_sparse::benny_amd(int order)
+{
+  if (!is_csc() || order <= 0 || order > 3) return 0;
+
+  // Construct matrix C
+  benny_sparse *AT = this->benny_transpose(false);
+  if (AT == 0) return 0;
+  int dense = BENNY_MAX(16, 10*sqrt(double(n)));
+  dense = BENNY_MIN(n-2, dense);
+  benny_sparse *C = 0;
+  if (order == 1 && n == m) C = this->benny_add(AT, 0, 0); // C = A + A'
+  else if (order == 2) {
+    int *ATp = AT->p; int *ATi = AT->i;
+    int p2, j;
+    for (p2 = 0, j = 0; j < m; j++) {
+      int p = ATp[j];
+      ATp[j] = p2;
+      if (ATp[j+1] - p > dense) continue;
+      for ( ; p < ATp[j+1]; p++) ATi[p2++] = ATi[p];
+    }
+    ATp[n] = p2;
+    benny_sparse *A2 = benny_transpose(false);
+    C = (A2 != 0) ? AT->benny_multiply(this) : 0; // C = A'*A with no dense rows
+    delete A2; 
+  }
+  else C = AT->benny_multiply(this); // C = A'*A
+  
+  delete AT;
+  if (C == 0) return 0;
+  C->benny_fkeep(&benny_diag, 0);
+  
+  return 0;
+}
+
 /// @brief Permute a sparse matrix, C=P*A*Q
 /// C++ implementation of cs_permute on page 21
 /// @param pinv Inverse row permutation vector
@@ -742,13 +798,8 @@ benny_sparse::benny_schol(int order)
   benny_symbolic *S = new benny_symbolic();
   if (S == 0) return 0;
 
-  // Natural ordering
-  int *P = new int[this->n];
-  if (P == 0) {
-    delete S;
-    return 0;
-  }
-  for (int i = 0; i < this->n; i++) P[i] = i;
+  // Ordering
+  int *P = benny_amd(order);
 
   S->pinv = benny_pinv(P, this->n);
   delete [] P;
@@ -781,13 +832,8 @@ benny_sparse::benny_sqr(int order, bool qr)
    benny_symbolic *S = new benny_symbolic();
    if (S == 0) return 0;
 
-   // Natural ordering
-   S->q = new int[n];
-   if (order && S->q == 0) {
-       delete S;
-       return 0;
-   }
-   for (int i = 0; i < n; i++) S->q[i] = i;
+   // Ordering
+   S->q = benny_amd(order);
 
    int ok = 0;
    if (qr) {
