@@ -40,7 +40,7 @@ int main (int argc, char **argv)
 }
 ```
 
-Load a dense matrix from file, then compress.
+Load a dense matrix from file, then compress and solve.
 
 ```cpp
 #include "benny_sparse.hpp"
@@ -59,6 +59,29 @@ int main (int argc, char **argv)
 
   Tc->benny_print(std::cout);
 
+  double *x = new double[Tc->ncols()];
+
+  for (int i = 0; i < Tc->ncols(); i++) x[i] = 0.0;
+  x[0] = 1;
+  int ok = Tc->benny_cholsol(0,x);
+  if (ok < 0) {
+    std::cout << "Cholesky decomposition failed" << std::endl;
+  } 
+  else {
+    std::cout << x[0] << std::endl;
+  }
+
+  for (int i = 0; i < Tc->ncols(); i++) x[i] = 0.0;
+  x[0] = 1;
+  ok = Tc->benny_lusol(0,x,0.001);  
+  if (ok < 0) {
+    std::cout << "LU decomposition failed" << std::endl;
+  }
+  else {
+    std::cout << x[0] << std::endl;
+  }
+
+  delete [] x;
   delete Tc;
 
   return 0;
