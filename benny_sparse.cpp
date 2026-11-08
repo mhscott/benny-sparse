@@ -37,6 +37,16 @@ benny_sparse::benny_ndone(benny_numeric *N, benny_sparse *C, int *w, double *x, 
     }
 }
 
+int
+benny_sparse::benny_wclear(int mark, int lenmax, int *w, int n)
+{
+  if (mark < 2 || (mark + lenmax < 0)) {
+    for (int k = 0; k < n; k++) if (w[k] != 0) w[k] = 1;
+    mark = 2;
+  }
+  return mark;
+}
+
 /// @brief C++ implementation of cs_spalloc on page 11
 /// @param m
 /// @param n
@@ -318,6 +328,7 @@ benny_sparse::benny_fkeep(bool (*fkeep)(int, int, double, void *), void *other)
 {
   if (!is_csc() || fkeep == 0) return -1;
 
+  int nz = 0;
   int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
   for (int j = 0; j < n; j++) {
     int p = Ap[j];
@@ -493,7 +504,7 @@ benny_sparse::benny_multiply(const benny_sparse *B)
   bool values = (this->x != 0) && (Bx != 0);
   double *x = values ? new double[m] : 0;
   benny_sparse *C = new benny_sparse(m, B->n, anz + bnz, values, false);
-  if (C == 0 || w == 0 || (values && x == 0)) benny_done(C, w, x, false);
+  if (C == 0 || w == 0 || (values && x == 0)) return benny_done(C, w, x, false);
 
   int *Cp = C->p;
   int nz = 0;
@@ -521,11 +532,11 @@ benny_sparse::benny_transpose(bool values)
   if (!is_csc()) return 0;
 
   int *Ap = this->p; int *Ai = this->i; double *Ax = this->x;
-  benny_sparse *C = new benny_sparse(this->m, this->n, Ap[n], values && Ax != 0, false);
-  int *w = new int[n];
+  benny_sparse *C = new benny_sparse(this->n, this->m, Ap[n], values && Ax != 0, false);
+  int *w = new int[m];
   if (C == 0 || w == 0) return benny_done(C, w, 0, false);
 
-  for (int i = 0; i < n; i++) w[i] = 0;
+  for (int i = 0; i < m; i++) w[i] = 0;
 
   int *Cp = C->p; int *Ci = C->i; double *Cx = C->x;
   for (int p = 0; p < Ap[n]; p++) w[Ai[p]]++;
@@ -634,9 +645,10 @@ benny_sparse::benny_amd(int order)
       if (ATp[j+1] - p > dense) continue;
       for ( ; p < ATp[j+1]; p++) ATi[p2++] = ATi[p];
     }
-    ATp[n] = p2;
-    benny_sparse *A2 = benny_transpose(false);
-    C = (A2 != 0) ? AT->benny_multiply(this) : 0; // C = A'*A with no dense rows
+    ATp[m] = p2;
+    benny_sparse *A2 = AT->benny_transpose(false);
+    C = (A2 != 0) ? AT->benny_multiply(A2) : 0; // C = A'*A with no dense rows
+    if (C == 0) cout << "C is NULL" << endl;
     delete A2; 
   }
   else C = AT->benny_multiply(this); // C = A'*A
@@ -645,7 +657,295 @@ benny_sparse::benny_amd(int order)
   if (C == 0) return 0;
   C->benny_fkeep(&benny_diag, 0);
   
-  return 0;
+  int *Cp = C->p;
+  int cnz = Cp[n];
+  int *P = new int[n+1];
+  int *W = new int[8*(n+1)];
+  int t = cnz + cnz/5 + 2*n;
+  if (P == 0 || W == 0 || C->benny_sprealloc(t) < 0) return benny_idone(P, C, W, false);
+
+  // REMOVE
+  // for (int i = 0; i < n+1; i++)
+  //   P[i] = i;
+  // return benny_idone(P, C, W, true);
+
+  int *len    = W;
+  int *nv     = W +   (n+1);
+  int *next   = W + 2*(n+1);
+  int *head   = W + 3*(n+1);
+  int *elen   = W + 4*(n+1);
+  int *degree = W + 5*(n+1);
+  int *w      = W + 6*(n+1);
+  int *hhead  = W + 7*(n+1);
+  int *last = P;
+
+  // Initialize quotient graph
+  for (int k = 0; k < n; k++) len[k] = Cp[k+1] - Cp[k];
+  len[n] = 0;
+  int nzmax = C->nzmax;
+  int *Ci = C->i;
+  for (int i = 0; i <= n; i++) {
+    head[i] = -1;
+    last[i] = -1;
+    next[i] = -1;
+    hhead[i] = -1;
+    nv[i] = 1;
+    w[i] = 1;
+    elen[i] = 0;
+    degree[i] = len[i];
+  }
+  int mark = benny_wclear(0,0,w,n);
+  elen[n] = -2;
+  Cp[n] = -1;
+  w[n] = 0;
+
+  // Initialize degree lists
+  int nel = 0;
+  for (int i = 0; i < n; i++) {
+    int d = degree[i];
+    if (d == 0) {
+      elen[i] = -2;
+      nel++;
+      Cp[i] = -1;
+      w[i] = 0;
+    }
+    else if (d > dense) {
+      nv[i] = 0;
+      elen[i] = -1;
+      nel++;
+      Cp[i] = BENNY_FLIP(n);
+      nv[n]++;
+    }
+    else {
+      if (head[d] != -1) last[head[d]] = i;
+      next[i] = head[d];
+      head[d] = i;
+    }
+  }
+
+  int mindeg = 0;
+  while (nel < n) {
+    // Select node of minimum approximate degree
+    int k;
+    for (k = -1; mindeg < n && (k = head[mindeg]) == -1; mindeg++) {}
+    if (next[k] != -1) last[next[k]] = -1;
+    head[mindeg] = next[k];
+    int elenk = elen[k];
+    int nvk = nv[k];
+    nel += nvk;
+
+    // Garbage collection
+    if (elenk > 0 && cnz + mindeg >= nzmax) {
+      int p, q;
+      for (int j = 0; j < n; j++) {
+        if ((p = Cp[j]) >= 0) {
+          Cp[j] = Ci[p];
+          Ci[p] = BENNY_FLIP(j);
+        }
+      }
+      for (q = 0, p = 0; p < cnz; ) {
+        int j;
+        if ((j = BENNY_FLIP(Ci[p++])) >= 0) {
+          Ci[q] = Cp[j];
+          Cp[j] = q++;
+          for (int k3 = 0; k3 < len[j]-1; k3++) Ci[q++] = Ci[p++];
+        }
+      }
+      cnz = q;
+    }
+
+    // Construct new element
+    int dk = 0;
+    nv[k] = -nvk;
+    int p = Cp[k];
+    int pk1 = (elenk == 0) ? p : cnz;
+    int pk2 = pk1;
+    for (int k1 = 1; k1 <= elenk+1; k1++) {
+      int e, pj, ln;
+      if (k1 > elenk) {
+        e = k;
+        pj = p;
+        ln = len[k] - elen[k];
+      } else {
+        e = Ci[p++];
+        pj = Cp[e];
+        ln = len[e];
+      }
+      for (int k2 = 1; k2 <= ln; k2++) {
+        int i = Ci[pj++];
+        int nvi;
+        if ((nvi = nv[i]) <= 0) continue;
+        dk += nvi;
+        nv[i] = -nvi;
+        Ci[pk2++] = i;
+        if (next[i] != -1) last[next[i]] = last[i];
+        if (last[i] != -1) {
+          next[last[i]] = next[i];
+        } else {
+          head[degree[i]] = next[i];
+        }
+      }
+      if (e != k) {
+        Cp[e] = BENNY_FLIP(k);
+        w[e] = 0;
+      }
+    }
+    if (elenk != 0) cnz = pk2;
+    degree[k] = dk;
+    Cp[k] = pk1;
+    len[k] = pk2-pk1;
+    elen[k] = -2;
+
+    // Find set differences
+    int lemax = 0;
+    mark = benny_wclear(mark, lemax, w, n);
+    for (int pk = pk1; pk < pk2; pk++) {
+      int i = Ci[pk];
+      int eln;
+      if ((eln = elen[i]) <= 0) continue;
+      int nvi = -nv[i];
+      int wnvi = mark - nvi;
+      for (int p = Cp[i]; p <= Cp[i]+eln-1; p++) {
+        int e = Ci[p];
+        if (w[e] >= mark) w[e] -= nvi;
+        else if (w[e] != 0) w[e] = degree[e] + wnvi;
+      }
+    }
+
+    // Degree update
+    for (int pk = pk1; pk < pk2; pk++) {
+      int i = Ci[pk];
+      int p1 = Cp[i];
+      int p2 = p1 + elen[i] - 1;
+      int pn = p1;
+      int h; int d;
+      for (h = 0, d = 0, p = p1; p <= p2; p++) {
+        int e = Ci[p];
+        if (w[e] != 0) {
+          int dext = w[e] - mark;
+          if (dext > 0) {
+            d += dext;
+            Ci[pn++] = e;
+            h += e;
+          } else {
+            Cp[e] = BENNY_FLIP(k);
+            w[e] = 0;
+          }
+        }
+      }
+      elen[i] = pn - p1 + 1;
+      int p3 = pn;
+      int p4 = p1 + len[i];
+      for (int p = p2+1; p < p4; p++) {
+        int j = Ci[p];
+        int nvj;
+        if ((nvj = nv[j]) <= 0) continue;
+        d += nvj;
+        Ci[pn++] = j;
+        h += j;
+      }
+      if (d == 0) {
+        Cp[i] = BENNY_FLIP(k);
+        int nvi = -nv[i];
+        dk -= nvi;
+        nvk += nvi;
+        nel += nvi;
+        nv[i] = 0;
+        elen[i] = -1;
+      } else {
+        degree[i] = BENNY_MIN(degree[i], d);
+        Ci[pn] = Ci[p3];
+        Ci[p3] = Ci[p1];
+        Ci[p1] = k;
+        len[i] = pn - p1 + 1;
+        h %= n; // This is the line in CSparse  h = ((h<0) ? (-h):h) % n ;
+        next[i] = hhead[h];
+        hhead[h] = i;
+        last[i] = h;
+      }
+    }
+    degree[k] = dk;
+    lemax = BENNY_MAX(lemax,dk);
+    mark = benny_wclear(mark+lemax, lemax, w, n);
+
+    // Supernode detection
+    for (int pk = pk1; pk < pk2; pk++) {
+      int i = Ci[pk];
+      if (nv[i] >= 0) continue;
+      unsigned int h = last[i];
+      i = hhead[h];
+      hhead[h] = -1;
+      for ( ; i != -1 && next[i] != -1; i = next[i], mark++) {
+        int ln = len[i];
+        int eln = elen[i];
+        for (int p = Cp[i]+1; p <= Cp[i] + ln-1; p++) w[Ci[p]] = mark;
+        int jlast = i;
+        for (int j = next[i]; j != -1; ) {
+          bool ok = (len[j] == ln) && (elen[j] == eln);
+          for (int p = Cp[j] + 1; ok && p <= Cp[j] + ln-1; p++) {
+            if (w[Ci[p]] != mark) ok = false;
+          }
+          if (ok) {
+            Cp[j] = BENNY_FLIP(i);
+            nv[i] += nv[j];
+            nv[j] = 0;
+            elen[j] = -1;
+            j = next[j];
+            next[jlast] = j;
+          }
+          else {
+            jlast = j;
+            j = next[j];
+          }
+        }
+      }
+    }
+
+    // Finalize new element
+    p = pk1;
+    for (int pk = pk1; pk < pk2; pk++) {
+      int i = Ci[pk];
+      int nvi;
+      if ((nvi = -nv[i]) <= 0) continue;
+      nv[i] = nvi;
+      int d = degree[i] + dk - nvi;
+      d = BENNY_MIN(d, n-nel-nvi);
+      if (head[d] != -1) last[head[d]] = i;
+      next[i] = head[d];
+      last[i] = -1;
+      head[d] = i;
+      mindeg = BENNY_MIN(mindeg, d);
+      degree[i] = d;
+      Ci[p++] = i;
+    }
+    nv[k] = nvk;
+    if ((len[k] = p-pk1) == 0) {
+      Cp[k] = -1;
+      w[k] = 0;
+    }
+    if (elenk != 0) cnz = p;
+  }
+
+  // Postordering
+  for (int i = 0; i < n; i++) Cp[i] = BENNY_FLIP(Cp[i]);
+  for (int j = 0; j <= n; j++) head[j] = -1;
+  for (int j = n; j >= 0; j--) {
+    if (nv[j] > 0) continue;
+    next[j] = head[Cp[j]];
+    head[Cp[j]] = j;
+  }
+  for (int e = n; e >= 0; e--) {
+    if (nv[e] <= 0) continue;
+    if (Cp[e] != -1) {
+      next[e] = head[Cp[e]];
+      head[Cp[e]] = e;
+    }
+  }
+  for (int k = 0, i = 0; i <= n; i++) {
+    if (Cp[i] == -1) k = benny_tdfs(i, k, head, next, P, w);
+  }
+
+  return benny_idone(P, C, W, true);
 }
 
 /// @brief Permute a sparse matrix, C=P*A*Q
@@ -834,10 +1134,22 @@ benny_sparse::benny_sqr(int order, bool qr)
 
    // Ordering
    S->q = benny_amd(order);
+  //  if (S->q != 0)
+  //  for (int i = 0; i < n; i++) cout << S->q[i] << ' ';
+  //  else cout << "S->q is NULL" << endl;
 
    int ok = 0;
    if (qr) {
-    ok = -1;
+    benny_sparse *C = order ? benny_permute(0, S->q, false) : this;
+    S->parent = C->benny_etree(true);
+    int *post = benny_post(S->parent, n);
+    S->cp = C->benny_counts(S->parent, post, true);
+    if (post != 0) delete [] post;
+    ok = C && S->parent && S->cp && benny_vcount(C, S);
+    int k;
+    if (ok) for (S->unz = 0, k = 0; k < n; k++) S->unz += S->cp[k];
+    ok = ok && S->lnz >= 0 && S->unz >= 0;
+    if (order) delete C;
    }
    else {
     S->unz = 4*p[n] + n;
@@ -1218,6 +1530,12 @@ benny_sparse::benny_counts(const int *parent, const int *post, bool ata)
   for (int j = 0; j < n; j++) if (parent[j] != -1) colcount[parent[j]] += colcount[j];
 
   return benny_idone(colcount, AT, w, true);
+}
+
+int 
+benny_sparse::benny_vcount(const benny_sparse *A, benny_symbolic *C)
+{
+  return 1;
 }
 
 benny_numeric *

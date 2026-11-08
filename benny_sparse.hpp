@@ -30,6 +30,7 @@ private:
  static benny_sparse *benny_done(benny_sparse *C, int *w, double *x, bool ok);
  static int *benny_idone(int *p, benny_sparse *C, int *w, bool ok);
  static benny_numeric *benny_ndone(benny_numeric *N, benny_sparse *C, int *w, double *x, bool ok);
+ static int benny_wclear(int mark, int lenmax, int *w, int n);
 
  int benny_sprealloc(int newnzmax);
  static int benny_reach(benny_sparse *G, const benny_sparse *B, int k, int *xi, const int *pinv);
@@ -45,7 +46,8 @@ private:
  void init_ata(const int *post, int *w, int **head, int **next);
  int *benny_rowcnt(int *parent, int *post);
  int *benny_counts(const int *parent, const int *post, bool ata = false);
-
+ static int benny_vcount(const benny_sparse *A, benny_symbolic *C);
+ 
  int benny_fkeep(bool (*fkeep)(int, int, double, void *), void *other);
  static bool benny_nonzero(int i, int j, double aij, void *other) {return aij != 0.0;}
  static bool benny_tol(int i, int j, double aij, void *tol) {return fabs(aij) > *((double *)tol);}
