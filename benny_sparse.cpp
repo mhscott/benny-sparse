@@ -1155,7 +1155,7 @@ benny_sparse::benny_sqr(int order, bool qr)
     S->unz = 4*p[n] + n;
     S->lnz = S->unz;
    }
-   if (ok == 0) return S;
+   if (ok) return S;
    else {
     delete S;
     return 0;
