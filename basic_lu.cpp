@@ -16,7 +16,7 @@ int main (int argc, char **argv)
     double x[3] = {0,0,0};
     x[1] = 1;
     
-    if (Tc->benny_cholsol(1,x)) {
+    if (Tc->benny_cholsol(0,x)) {
         std::cerr << "failed to solve Ax=b by cholesky decomposition" << std::endl;
         return -1;
     }
