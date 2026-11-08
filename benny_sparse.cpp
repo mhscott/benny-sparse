@@ -191,11 +191,13 @@ benny_sparse::benny_sprealloc(int newnzmax)
 {
   if (newnzmax <= 0) newnzmax = is_csc() ? p[n] : nz;
 
+  int oki, okj = 1, okx = 1;
   // Resize the row index vector
   int *newi = new int[newnzmax];
   for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newi[i] = this->i[i];
   delete [] this->i;
   this->i = newi;
+  oki = this->i ? 1 : 0;
 
   // Resize the column index vector
   if (is_triplet()) {
@@ -203,6 +205,7 @@ benny_sparse::benny_sprealloc(int newnzmax)
     for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newp[i] = this->p[i];
     delete [] this->p;
     this->p = newp;
+    okj = this->p ? 1 : 0;
   }
 
   // Resize the values vector
@@ -211,11 +214,12 @@ benny_sparse::benny_sprealloc(int newnzmax)
     for (int i = 0; i < BENNY_MIN(nzmax,newnzmax); i++) newx[i] = this->x[i];
     delete [] this->x;
     this->x = newx;
+    okx = this->x ? 1 : 0;
   }
+  int ok = oki && okj && okx;
+  if (ok) nzmax = newnzmax;
 
-  nzmax = newnzmax;
-
-  return 0;
+  return ok;
 }
 
 /// @brief Add an entry to this matrix, either a new triplet or
