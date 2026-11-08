@@ -461,7 +461,7 @@ benny_sparse::benny_scatter(int j, double beta, int *w, double *x, int mark, ben
 benny_sparse *
 benny_sparse::benny_add(const benny_sparse *B, double alpha, double beta)
 {
-  if (!is_csc() | !B->is_csc()) return 0;
+  if (!is_csc() || !B->is_csc()) return 0;
 
   int anz = p[n];
   int *Bp = B->p; double *Bx = B->x; int bnz = Bp[B->n];
