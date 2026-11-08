@@ -1142,7 +1142,7 @@ benny_sparse::benny_sqr(int order, bool qr)
   //  for (int i = 0; i < n; i++) cout << S->q[i] << ' ';
   //  else cout << "S->q is NULL" << endl;
 
-   int ok = 0;
+   int ok = 1;
    if (qr) {
     benny_sparse *C = order ? benny_permute(0, S->q, false) : this;
     S->parent = C->benny_etree(true);
