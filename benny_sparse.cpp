@@ -1620,10 +1620,11 @@ benny_sparse::benny_cholsol(int order, double *b)
 }
 
 int
-benny_sparse::benny_cholsol(const benny_symbolic *S, const benny_numeric *N, double *b, double *x)
+benny_sparse::benny_cholsol(const benny_symbolic *S, const benny_numeric *N, double *b)
 {
   if (!is_csc() || b == 0) return -1;
 
+  double *x = new double[n];
   bool ok = S != 0 && N != 0 && x != 0;
   if (ok) {
     benny_ipvec(S->pinv, b, x, n); // x = P*b
@@ -1632,6 +1633,8 @@ benny_sparse::benny_cholsol(const benny_symbolic *S, const benny_numeric *N, dou
     benny_pvec(S->pinv, x, b, n); // b = P'*x
   }
 
+  delete [] x;
+  
   return ok ? 0 : -1;
 }
 
@@ -1749,10 +1752,11 @@ benny_sparse::benny_lusol(int order, double *b, double tol)
 }
 
 int
-benny_sparse::benny_lusol(const benny_symbolic *S, const benny_numeric *N, double *b, double *x)
+benny_sparse::benny_lusol(const benny_symbolic *S, const benny_numeric *N, double *b)
 {
   if (!is_csc() || b == 0) return -1;
 
+  double *x = new double[n];
   bool ok = S != 0 && N != 0 && x != 0;
   if (ok) {
     benny_ipvec(N->pinv, b, x, n); // x = b(p)
@@ -1760,6 +1764,8 @@ benny_sparse::benny_lusol(const benny_symbolic *S, const benny_numeric *N, doubl
     N->U->benny_usolve(x); // x = U\x
     benny_ipvec(S->q, x, b, n); // b(q) = x
   }
+
+  delete [] x;
 
   return ok ? 0 : -1;
 }
